@@ -5,22 +5,13 @@ import (
 	"net/http"
 	"os"
 
-	slogctx "github.com/veqryn/slog-context"
-	sloghttp "github.com/veqryn/slog-context/http"
+	yasctx "github.com/pazams/yasctx"
 )
 
 func init() {
-	// Create the *slogctx.Handler middleware
-	h := slogctx.NewHandler(
+	// Create the *yasctx.Handler middleware
+	h := yasctx.NewHandler(
 		slog.NewJSONHandler(os.Stdout, nil), // The next or final handler in the chain
-		&slogctx.HandlerOptions{
-			// Prependers will first add any sloghttp.With attributes,
-			// then anything else Prepended to the ctx
-			Prependers: []slogctx.AttrExtractor{
-				sloghttp.ExtractAttrCollection, // our sloghttp middleware extractor
-				slogctx.ExtractPrepended,       // for all other prepended attributes
-			},
-		},
 	)
 	slog.SetDefault(slog.New(h))
 }
@@ -29,8 +20,7 @@ func main() {
 	slog.Info("Starting server. Please run: curl localhost:8080/hello?id=24680")
 
 	// Wrap our final handler inside our middlewares.
-	// AttrCollector -> Request Logging -> Final Endpoint Handler (helloUser)
-	handler := sloghttp.AttrCollection(
+	handler := middlewareWithInitGlobal(
 		httpLoggingMiddleware(
 			http.HandlerFunc(helloUser),
 		),
@@ -52,27 +42,33 @@ func main() {
 func httpLoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Add some logging context/baggage before the handler
-		r = r.WithContext(sloghttp.With(r.Context(), "path", r.URL.Path))
+		r = r.WithContext(yasctx.AddWithPropagation(r.Context(), "path", r.URL.Path))
 
 		// Call the next handler
 		next.ServeHTTP(w, r)
 
 		// Log out that we had a response. This would be where we could add
 		// things such as the response status code, body, etc.
-
 		// Should also have both "path" and "id", but not "foo".
 		// Having "id" included in the log is the whole point of this package!
-		slogctx.Info(r.Context(), "Response", "method", r.Method)
+		slog.InfoContext(r.Context(), "Response", "method", r.Method)
 		/*
 			{
-				"time": "2024-04-01T00:06:11Z",
-				"level": "INFO",
-				"msg": "Response",
-				"path": "/hello",
-				"id": "24680",
-				"method": "GET"
+			    "time": "2025-06-26T23:29:27.034817656-06:00",
+			    "level": "INFO",
+			    "msg": "Response",
+			    "path": "/hello",
+			    "id": "24680",
+			    "method": "GET"
 			}
 		*/
+	})
+}
+
+func middlewareWithInitGlobal(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(yasctx.InitPropagation(r.Context()))
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -85,26 +81,26 @@ func helloUser(w http.ResponseWriter, r *http.Request) {
 	// sloghttp.With will add the "id" to the middleware, because it is a
 	// synchronized map. It will show up in all log calls up and down the stack,
 	// until the request sloghttp middleware exits.
-	ctx := sloghttp.With(r.Context(), "id", id)
+	ctx := yasctx.AddWithPropagation(r.Context(), "id", id)
 
-	// The regular slogctx.With will add "foo" only to the Returned context,
+	// The regular yasctx.Add  will add "foo" only to the Returned context,
 	// which will limits its scope to the rest of this function (helloUser) and
 	// any functions called by helloUser and passed this context.
 	// The original caller of helloUser and all the middlewares will NOT see
 	// "foo", because it is only part of the newly returned ctx.
-	ctx = slogctx.With(ctx, "foo", "bar")
+	ctx = yasctx.Add(ctx, "foo", "bar")
 
 	// Log some things.
 	// Should also have both "path", "id", and "foo"
-	slogctx.Info(ctx, "saying hello...")
+	slog.InfoContext(ctx, "saying hello...")
 	/*
 		{
-			"time": "2024-04-01T00:06:11Z",
-			"level": "INFO",
-			"msg": "saying hello...",
-			"path": "/hello",
-			"id": "24680",
-			"foo": "bar"
+		    "time": "2025-06-26T23:29:27.034778494-06:00",
+		    "level": "INFO",
+		    "msg": "saying hello...",
+		    "path": "/hello",
+		    "id": "24680",
+		    "foo": "bar"
 		}
 	*/
 

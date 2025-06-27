@@ -1,4 +1,4 @@
-package slogctx
+package yasctx
 
 import (
 	"context"
@@ -12,19 +12,6 @@ import (
 // attributes.
 type AttrExtractor func(ctx context.Context, recordT time.Time, recordLvl slog.Level, recordMsg string) []slog.Attr
 
-// HandlerOptions are options for a Handler
-type HandlerOptions struct {
-	// A list of functions to be called, each of which will return attributes
-	// that should be prepended to the start of every log line with this context.
-	// If left nil, the default ExtractPrepended function will be used only.
-	Prependers []AttrExtractor
-
-	// A list of functions to be called, each of which will return attributes
-	// that should be appended to the end of every log line with this context.
-	// If left nil, the default ExtractAppended function will be used only.
-	Appenders []AttrExtractor
-}
-
 // Handler is a slog.Handler middleware that will Prepend and
 // Append attributes to log lines. The attributes are extracted out of the log
 // record's context by the provided AttrExtractor methods.
@@ -33,25 +20,23 @@ type Handler struct {
 	next       slog.Handler
 	goa        *groupOrAttrs
 	prependers []AttrExtractor
-	appenders  []AttrExtractor
 }
 
 var _ slog.Handler = &Handler{} // Assert conformance with interface
 
-// NewMiddleware creates a slogctx.Handler slog.Handler middleware
+// NewMiddleware creates a yasctx.Handler slog.Handler middleware
 // that conforms to [github.com/samber/slog-multi.Middleware] interface.
 // It can be used with slogmulti methods such as Pipe to easily setup a pipeline of slog handlers:
 //
 //	slog.SetDefault(slog.New(slogmulti.
-//		Pipe(slogctx.NewMiddleware(&slogctx.HandlerOptions{})).
+//		Pipe(yasctx.NewMiddleware()).
 //		Pipe(slogdedup.NewOverwriteMiddleware(&slogdedup.OverwriteHandlerOptions{})).
-//		Handler(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{})),
+//		Handler(slog.NewJSONHandler(os.Stdout)),
 //	))
-func NewMiddleware(options *HandlerOptions) func(slog.Handler) slog.Handler {
+func NewMiddleware() func(slog.Handler) slog.Handler {
 	return func(next slog.Handler) slog.Handler {
 		return NewHandler(
 			next,
-			options,
 		)
 	}
 }
@@ -61,21 +46,16 @@ func NewMiddleware(options *HandlerOptions) func(slog.Handler) slog.Handler {
 // record's context by the provided AttrExtractor methods.
 // It passes the final record and attributes off to the next handler when finished.
 // If opts is nil, the default options are used.
-func NewHandler(next slog.Handler, opts *HandlerOptions) *Handler {
-	if opts == nil {
-		opts = &HandlerOptions{}
-	}
-	if opts.Prependers == nil {
-		opts.Prependers = []AttrExtractor{ExtractPrepended}
-	}
-	if opts.Appenders == nil {
-		opts.Appenders = []AttrExtractor{ExtractAppended}
+func NewHandler(next slog.Handler) *Handler {
+
+	prependers := []AttrExtractor{
+		extractPropagatedAttrs,
+		extractAdded,
 	}
 
 	return &Handler{
 		next:       next,
-		prependers: slices.Clone(opts.Prependers),
-		appenders:  slices.Clone(opts.Appenders),
+		prependers: prependers,
 	}
 }
 
@@ -87,6 +67,23 @@ func (h *Handler) Enabled(ctx context.Context, level slog.Level) bool {
 
 // Handle de-duplicates all attributes and groups, then passes the new set of attributes to the next handler.
 func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
+
+	// Initialize a mapping from extractAddedToGroup() with added bool to track which groups were used.
+	// This will allow us to prepend any unused groups to the final attributes.
+	addedToGroup := map[string]*struct {
+		attrs []slog.Attr
+		used  bool
+	}{}
+	for k, v := range extractAddedToGroup(ctx, r.Time, r.Level, r.Message) {
+		addedToGroup[k] = &struct {
+			attrs []slog.Attr
+			used  bool
+		}{
+			attrs: v,
+			used:  false,
+		}
+	}
+
 	// Collect all attributes from the record (which is the most recent attribute set).
 	// These attributes are ordered from oldest to newest, and our collection will be too.
 	finalAttrs := make([]slog.Attr, 0, r.NumAttrs())
@@ -95,15 +92,18 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		return true
 	})
 
-	// Add our 'appended' context attributes to the end
-	for _, f := range h.appenders {
-		finalAttrs = append(finalAttrs, f(ctx, r.Time, r.Level, r.Message)...)
-	}
-
 	// Iterate through the goa (group Or Attributes) linked list, which is ordered from newest to oldest
 	for g := h.goa; g != nil; g = g.next {
 		if g.group != "" {
-			// If a group, but all the previous attributes (the newest ones) in it
+			if ctxGroupAttrs, ok := addedToGroup[g.group]; ok {
+				// If we have attributes for this group, we will use them.
+				if !ctxGroupAttrs.used {
+					// Mark this group as used, so we don't use it again.
+					ctxGroupAttrs.used = true
+					finalAttrs = append(slices.Clip(ctxGroupAttrs.attrs), finalAttrs...)
+				}
+			}
+			// If a group, put all the previous attributes (the newest ones) in it
 			finalAttrs = []slog.Attr{{
 				Key:   g.group,
 				Value: slog.GroupValue(finalAttrs...),
@@ -111,6 +111,13 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		} else {
 			// Prepend to the front of finalAttrs, thereby making finalAttrs ordered from oldest to newest
 			finalAttrs = append(slices.Clip(g.attrs), finalAttrs...)
+		}
+	}
+
+	// Add in any unsued group attributes that were not used to the start (root)
+	for _, ctxGroupAttrs := range addedToGroup {
+		if !ctxGroupAttrs.used {
+			finalAttrs = append(slices.Clip(ctxGroupAttrs.attrs), finalAttrs...)
 		}
 	}
 
