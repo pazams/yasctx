@@ -75,3 +75,35 @@ func TestHandler(t *testing.T) {
 		t.Errorf("Expected source fields are incorrect: %#+v\n", unmarshalled)
 	}
 }
+
+func TestPassNilToAddToGroup(t *testing.T) {
+	t.Parallel()
+
+	tester := &test.Handler{}
+	h := NewHandler(tester)
+
+	ctx := AddToGroup(nil, "group", "prependGroupFound", "arg1", "prependGroupFound", "arg2")
+
+	l := slog.New(h)
+
+	l = l.WithGroup("").With("with1", "arg1", "with1", "arg2")
+
+	l.InfoContext(ctx, "main message", "main1", "arg1", "main1", "arg2")
+
+	expectedText := `time=2023-09-29T13:00:59.000Z level=INFO msg="main message" prependGroupFound=arg1 prependGroupFound=arg2 with1=arg1 with1=arg2 main1=arg1 main1=arg2
+`
+	if s := tester.String(); s != expectedText {
+		t.Errorf("Expected:\n%s\nGot:\n%s\n", expectedText, s)
+	}
+
+	b, err := tester.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectedJSON := `{"time":"2023-09-29T13:00:59Z","level":"INFO","msg":"main message","prependGroupFound":"arg1","prependGroupFound":"arg2","with1":"arg1","with1":"arg2","main1":"arg1","main1":"arg2"}
+`
+	if string(b) != expectedJSON {
+		t.Errorf("Expected:\n%s\nGot:\n%s\n", expectedText, string(b))
+	}
+}
