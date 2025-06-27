@@ -9,7 +9,7 @@ import (
 	"github.com/pazams/yasctx/internal/attr"
 )
 
-// InitPropagation initializes a context that allows propegating attributes from child context back to parents.
+// InitPropagation initializes a context that allows propagating attributes from child context back to parents.
 // Essentially, it lets you collect slog attributes that are discovered later in
 // the stack (such as authentication and user ID's, derived values, attributes
 // only discovered halfway-through the final request handler after several db
@@ -67,7 +67,7 @@ func AddWithPropagation(ctx context.Context, args ...any) context.Context {
 
 // extractPropagatedAttrs is a yasctx Extractor that must be used with a
 // yasctx.Handler (via yasctx.HandlerOptions) as Prependers or Appenders.
-// It will cause the Handler to add the Attributes added by sloghttp.With to all
+// It will cause the Handler to add the Attributes added by yasctx.AddWithPropagation to all
 // log lines using that same context.
 func extractPropagatedAttrs(ctx context.Context, _ time.Time, _ slog.Level, _ string) []slog.Attr {
 	m := fromCtx(ctx)

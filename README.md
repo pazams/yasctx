@@ -1,5 +1,7 @@
 # yasctx
-Yet Anoter Slog Context libary
+Yet Anoter Slog Context Libary
+
+
 [![tag](https://img.shields.io/github/tag/pazams/yasctx.svg)](https://github.com/pazams/yasctx/releases)
 ![Go Version](https://img.shields.io/badge/Go-%3E%3D%201.21-%23007d9c)
 [![GoDoc](https://godoc.org/github.com/pazams/yasctx?status.svg)](https://pkg.go.dev/github.com/pazams/yasctx)
@@ -12,11 +14,7 @@ Yet Anoter Slog Context libary
 
 Package yasctx lets you use golang structured logging (slog) with context.
 
-Using the yasctx.NewHandler lets us add attributes to
-log lines, even when a logger is not passed into a function or in code we don't
-control. This is done without storing the logger in the context; instead the
-attributes are stored in the context and the Handler picks them up later
-whenever a new log line is written.
+Using the yasctx.NewHandler lets us add attributes to log lines, even when a logger is not passed into a function or in code we don't control. This is done without storing the logger in the context; instead the attributes are stored in the context and the Handler picks them up later whenever a new log line is written.
 
 This library was forked and pivoted from https://github.com/veqryn/slog-context
 ## Install
@@ -111,13 +109,13 @@ func main() {
 	slog.Info("Starting server. Please run: curl localhost:8080/hello?id=24680")
 
 	// Wrap our final handler inside our middlewares.
-	handler := middlewareWithInitGlobal(
+	handler := middlewareWithInitPropagation(
 		httpLoggingMiddleware(
 			http.HandlerFunc(helloUser),
 		),
 	)
 
-	// Demonstrate the sloghttp middleware with a http server
+	// Demonstrate the yasctx.AddWithPropagation with a http server
 	http.Handle("/hello", handler)
 	err := http.ListenAndServe(":8080", nil)
 	if err != nil {
@@ -127,9 +125,8 @@ func main() {
 
 // This is a stand-in for a middleware that might be capturing and logging out
 // things like the response code, request body, response body, url, method, etc.
-// It doesn't have access to any of the new context objects's created within the
-// next handler. But it should still log with any of the attributes added to our
-// sloghttp.Middleware, via sloghttp.With.
+// It doesn't have access to any of the new context's created within the next handler.
+// But it should still log with any of the attributes added through AddWithPropagation()
 func httpLoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Add some logging context/baggage before the handler
@@ -156,7 +153,8 @@ func httpLoggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func middlewareWithInitGlobal(next http.Handler) http.Handler {
+// middleware to initialize propagating attributes from child context back to parents for each request.
+func middlewareWithInitPropagation(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(yasctx.InitPropagation(r.Context()))
 		next.ServeHTTP(w, r)
@@ -169,9 +167,8 @@ func helloUser(w http.ResponseWriter, r *http.Request) {
 	// Add it to our middleware's context
 	id := r.URL.Query().Get("id")
 
-	// sloghttp.With will add the "id" to the middleware, because it is a
-	// synchronized map. It will show up in all log calls up and down the stack,
-	// until the request sloghttp middleware exits.
+	// yasctx.AddWithPropagation will add "id" to to the middleware, because it is a synchronized map.
+	// It will show up in all log calls up and down the stack, until the request in middlewareWithInitPropagation exits.
 	ctx := yasctx.AddWithPropagation(r.Context(), "id", id)
 
 	// The regular yasctx.Add  will add "foo" only to the Returned context,
