@@ -70,7 +70,7 @@ func TestHandler(t *testing.T) {
 	}
 
 	if unmarshalled.Source.Function != "github.com/pazams/yasctx.TestHandler" ||
-		!strings.HasSuffix(unmarshalled.Source.File, "slog-context/handler_test.go") ||
+		!strings.HasSuffix(unmarshalled.Source.File, "yasctx/handler_test.go") ||
 		unmarshalled.Source.Line != 40 {
 		t.Errorf("Expected source fields are incorrect: %#+v\n", unmarshalled)
 	}
