@@ -24,8 +24,7 @@ func TestAttrCollection(t *testing.T) {
 	l := slog.New(h)
 	ctx := context.Background()
 
-	// Setup with our sloghttp middleware, a logging middleware, then our endpoint
-	httpHandler := middlewareWithInitGlobal(
+	httpHandler := middlewareWithInitPropagation(
 		httpLoggingMiddleware(l)(
 			http.HandlerFunc(helloUser(l)),
 		),
@@ -73,7 +72,7 @@ func TestAttrCollection(t *testing.T) {
 // This is a stand-in for a middleware that might be capturing and logging out
 // things like the response code, request body, response body, url, method, etc.
 // It doesn't have access to any of the new context's created within the next handler.
-// But it should still log with any of the attributes added to our sloghttp.Middleware.
+// But it should still log with any of the attributes added through AddWithPropagation()
 func httpLoggingMiddleware(l *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -96,8 +95,8 @@ func helloUser(l *slog.Logger) http.HandlerFunc {
 		// Add it to our middleware's map
 		id := r.URL.Query().Get("id")
 
-		// sloghttp.With will add "id" to to the middleware, because it is a synchronized map.
-		// It will show up in all log calls up and down the stack, until the request sloghttp middleware exits.
+		// yasctx.AddWithPropagation will add "id" to to the middleware, because it is a synchronized map.
+		// It will show up in all log calls up and down the stack, until the request in middlewareWithInitPropagation exits.
 		ctx := yasctx.AddWithPropagation(r.Context(), "id", id)
 
 		// "foo" only to the Returned context, which will limits its scope
@@ -139,7 +138,8 @@ func TestOutsideRequest(t *testing.T) {
 	}
 }
 
-func middlewareWithInitGlobal(next http.Handler) http.Handler {
+// middleware to initialize propagating attributes from child context back to parents for each request.
+func middlewareWithInitPropagation(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(yasctx.InitPropagation(r.Context()))
 		next.ServeHTTP(w, r)
