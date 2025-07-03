@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-// AttrExtractor is a function that retrieves or creates slog.Attr's based
+// attrExtractor is a function that retrieves or creates slog.Attr's based
 // information/values found in the context.Context and the slog.Record's basic
 // attributes.
-type AttrExtractor func(ctx context.Context, recordT time.Time, recordLvl slog.Level, recordMsg string) []slog.Attr
+type attrExtractor func(ctx context.Context, recordT time.Time, recordLvl slog.Level, recordMsg string) []slog.Attr
 
 // Handler is a slog.Handler middleware that will Prepend and
 // Append attributes to log lines. The attributes are extracted out of the log
@@ -19,7 +19,7 @@ type AttrExtractor func(ctx context.Context, recordT time.Time, recordLvl slog.L
 type Handler struct {
 	next       slog.Handler
 	goa        *groupOrAttrs
-	prependers []AttrExtractor
+	prependers []attrExtractor
 }
 
 var _ slog.Handler = &Handler{} // Assert conformance with interface
@@ -48,7 +48,7 @@ func NewMiddleware() func(slog.Handler) slog.Handler {
 // If opts is nil, the default options are used.
 func NewHandler(next slog.Handler) *Handler {
 
-	prependers := []AttrExtractor{
+	prependers := []attrExtractor{
 		extractPropagatedAttrs,
 		extractAdded,
 	}
